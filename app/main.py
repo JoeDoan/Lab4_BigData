@@ -22,7 +22,7 @@ API_URL_DOCS = f"{API_BASE_URL}/docs"  # Used for health check
 LOG_FILE_PATH = "logs/query_metrics.csv"
 
 # --- 3. AUTO-START BACKEND LOGIC ---
-@st.cache_resource
+
 def ensure_backend_is_running():
     """
     Checks if the backend API is running. If not, it attempts to start it
@@ -68,7 +68,9 @@ def ensure_backend_is_running():
     st.stop()
 
 # Initialize Backend
-ensure_backend_is_running()
+if "backend_started" not in st.session_state:
+    ensure_backend_is_running()
+    st.session_state.backend_started = True
 
 # --- 4. HELPER FUNCTIONS ---
 
