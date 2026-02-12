@@ -30,9 +30,9 @@ def ensure_backend_is_running():
     """
     def is_server_active():
         try:
-            response = requests.get(API_URL_DOCS, timeout=1)
-            return response.status_code == 200
-        except requests.ConnectionError:
+            response = requests.get(API_URL_DOCS, timeout=5)
+            return response.status_code in [200, 404, 405, 422]
+        except (requests.ConnectionError, requests.Timeout):
             return False
 
     if is_server_active():
@@ -56,13 +56,13 @@ def ensure_backend_is_running():
         "--port", "8000"
     ])
     # Polling loop: Wait for server to become responsive
-    with st.spinner("🚀 Starting Backend API... Please wait..."):
-        for i in range(20):  # Wait up to 20 seconds
+    with st.spinner("🚀 Starting Backend API and loading AI Models... Please wait..."):
+        for i in range(40):  # TĂNG TỪ 20 LÊN 40
             if is_server_active():
                 st.toast("✅ Backend Server Started Successfully!", icon="🎉")
-                time.sleep(1)  # Brief buffer
+                time.sleep(2)
                 return True
-            time.sleep(1)
+            time.sleep(2)
             
     st.error("❌ Failed to start backend server after 20 seconds. Please check your terminal logs.")
     st.stop()
