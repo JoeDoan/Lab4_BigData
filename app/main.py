@@ -48,9 +48,13 @@ def ensure_backend_is_running():
     print(f"🔄 Starting backend server from: {server_script}...")
     
     # Start the process
-    # Using sys.executable ensures we use the same Python environment as Streamlit
-    subprocess.Popen([sys.executable, str(server_script)])
-
+    # Using sys.executable ensures we use the same Python environment as Streamlit)
+    subprocess.Popen([
+        sys.executable, "-m", "uvicorn", 
+        "api.server:app", 
+        "--host", "127.0.0.1", 
+        "--port", "8000"
+    ])
     # Polling loop: Wait for server to become responsive
     with st.spinner("🚀 Starting Backend API... Please wait..."):
         for i in range(20):  # Wait up to 20 seconds
