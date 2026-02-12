@@ -3,7 +3,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import uvicorn
+import sys
+import os
+from pathlib import Path
 
+root_path = Path(__file__).parent.parent.absolute()
+if str(root_path) not in sys.path:
+    sys.path.insert(0, str(root_path))
 # Import your actual RAG logic
 # Ensure your project root is in PYTHONPATH or this is run from root
 try:
