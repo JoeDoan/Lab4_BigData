@@ -1,0 +1,2 @@
+timestamp,query_id,retrieval_mode,top_k,latency_ms,Precision@5,Recall@10,evidence_ids_returned,gold_evidence_ids,faithfulness_pass,missing_evidence_behavior
+2026-02-12T22:11:07.469809+00:00,Q1,Hybrid (Dense+Sparse),5,2150.05,0.2,1.0,"[""doc_1"", ""doc_3"", ""doc_4_img"", ""doc_2""]","[""doc_1""]",Yes,Pass
