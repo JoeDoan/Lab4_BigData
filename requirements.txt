@@ -8,3 +8,4 @@ uvicorn
 pydantic
 sentence-transformers
 pymupdf
+rank_bm25
