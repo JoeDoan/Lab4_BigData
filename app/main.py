@@ -3,73 +3,102 @@ import pandas as pd
 import json
 import time
 import requests
+from pathlib import Path
 import subprocess
 import sys
-import os
-from pathlib import Path
+import time
+import requests
 
-# --- 1. APP CONFIGURATION (Must be the first Streamlit command) ---
-st.set_page_config(
-    page_title="CS5542 Lab 4 — RAG Client",
-    layout="wide",
-    initial_sidebar_state="expanded"
+def is_backend_running(url="http://127.0.0.1:8000/docs"):
+    try:
+        response = requests.get(url, timeout=1)
+        return response.status_code == 200
+    except requests.ConnectionError:
+        return False
+
+
+if not is_backend_running():
+    subprocess.Popen([sys.executable, "api/server.py"])
+    time.sleep(3)
+
+# --- CONFIGURATION ---
+API_URL = "http://localhost:8000/query"  # Address of your FastAPI server
+MISSING_EVIDENCE_MSG = "Not enough evidence in the retrieved context."
+LOG_FILE_DEFAULT = "logs/query_metrics.csv"
+
+st.set_page_config(page_title="CS5542 Lab 4 — RAG Client", layout="wide")
+st.title("CS 5542 Lab 4 — Project RAG Client")
+st.caption("Streamlit Frontend → FastAPI Backend → Retrieval Logic")
+
+# --- SIDEBAR CONTROLS ---
+st.sidebar.header("Retrieval Settings")
+
+# 1. Retrieval Mode
+retrieval_mode = st.sidebar.selectbox(
+    "Retrieval Mode",
+    ["Hybrid (Dense+Sparse)", "Dense Only", "Sparse Only"],
+    index=0
 )
 
-# --- 2. CONSTANTS & SETUP ---
-API_BASE_URL = "http://127.0.0.1:8000"
-API_URL_QUERY = f"{API_BASE_URL}/query"
-API_URL_DOCS = f"{API_BASE_URL}/docs"  # Used for health check
-LOG_FILE_PATH = "logs/query_metrics.csv"
+# 2. Hyperparameters
+top_k = st.sidebar.slider("Top K", min_value=1, max_value=30, value=5, step=1)
 
-# --- 3. AUTO-START BACKEND LOGIC ---
-@st.cache_resource
-def ensure_backend_is_running():
-    """
-    Checks if the backend API is running. If not, it attempts to start it
-    as a subprocess. This runs only once per session due to @st.cache_resource.
-    """
-    def is_server_active():
-        try:
-            response = requests.get(API_URL_DOCS, timeout=1)
-            return response.status_code == 200
-        except requests.ConnectionError:
-            return False
+# 3. Hybrid Alpha (Dense Weight)
+# We calculate alpha here to send to the API
+alpha = 0.5
+if retrieval_mode == "Hybrid (Dense+Sparse)":
+    alpha = st.sidebar.slider(
+        "Hybrid Alpha (Dense Weight)", 0.0, 1.0, 0.5, 0.1)
+    st.sidebar.caption("0.0 = Pure Sparse | 1.0 = Pure Dense")
+elif retrieval_mode == "Dense Only":
+    alpha = 1.0
+elif retrieval_mode == "Sparse Only":
+    alpha = 0.0
 
-    if is_server_active():
-        print("✅ Backend is already running.")
-        return True
+st.sidebar.header("Logging")
+log_path = st.sidebar.text_input("Log File Path", value=LOG_FILE_DEFAULT)
 
-    # Backend is not running, attempt to start it
-    server_script = Path("api/server.py")
-    if not server_script.exists():
-        st.error(f"❌ Critical Error: Could not find backend file at: {server_script.absolute()}")
-        st.stop()
+# --- MINI GOLD SET (Reflects your Lab 4 Requirements) ---
+MINI_GOLD = {
+    "Q1": {
+        "question": "What is the primary topic of the first document?",
+        "gold_evidence_ids": ["doc_1"]
+    },
+    "Q2": {
+        "question": "How does the system handle missing data?",
+        "gold_evidence_ids": ["doc_2"]
+    },
+    "Q3": {
+        "question": "What represents the dense vector space?",
+        "gold_evidence_ids": ["doc_3"]
+    },
+    "Q4": {
+        "question": "Explain the figure on page 2.",
+        "gold_evidence_ids": ["doc_4_img"]
+    },
+    "Q5": {
+        "question": "What is the airspeed velocity of an unladen swallow?",
+        "gold_evidence_ids": ["N/A"]
+    },
+}
 
-    print(f"🔄 Starting backend server from: {server_script}...")
-    
-    # Start the process
-    # Using sys.executable ensures we use the same Python environment as Streamlit
-    subprocess.Popen([sys.executable, str(server_script)])
+st.sidebar.header("Evaluation")
+query_id = st.sidebar.selectbox(
+    "Query ID (for logging)", list(MINI_GOLD.keys()))
+use_gold_question = st.sidebar.checkbox("Use Gold Question Text", value=True)
 
-    # Polling loop: Wait for server to become responsive
-    with st.spinner("🚀 Starting Backend API... Please wait..."):
-        for i in range(20):  # Wait up to 20 seconds
-            if is_server_active():
-                st.toast("✅ Backend Server Started Successfully!", icon="🎉")
-                time.sleep(1)  # Brief buffer
-                return True
-            time.sleep(1)
-            
-    st.error("❌ Failed to start backend server after 20 seconds. Please check your terminal logs.")
-    st.stop()
+# Main query input
+default_q = MINI_GOLD[query_id]["question"] if use_gold_question else ""
+question = st.text_area("Enter your question", value=default_q, height=100)
+run_btn = st.button("Run Query", type="primary")
 
-# Initialize Backend
-ensure_backend_is_running()
+colA, colB = st.columns([2, 1])
 
-# --- 4. HELPER FUNCTIONS ---
+# --- HELPER FUNCTIONS ---
+
 
 def ensure_logfile(path: str):
-    """Creates the log CSV with headers if it doesn't exist."""
+    """Creates log file with headers if it doesn't exist."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     if not p.exists():
@@ -80,186 +109,137 @@ def ensure_logfile(path: str):
         ])
         df.to_csv(p, index=False)
 
-def log_transaction(path: str, row_data: dict):
-    """Appends a new record to the CSV log."""
+
+def log_row(path: str, row: dict):
+    """Appends a new row to the CSV log."""
     ensure_logfile(path)
     try:
         df = pd.read_csv(path)
-        new_row = pd.DataFrame([row_data])
-        df = pd.concat([df, new_row], ignore_index=True)
+        new_df = pd.DataFrame([row])
+        df = pd.concat([df, new_df], ignore_index=True)
         df.to_csv(path, index=False)
         return True
     except Exception as e:
-        st.error(f"⚠️ Logging failed: {e}")
+        st.error(f"Error logging: {e}")
         return False
 
-def calculate_metrics(retrieved_ids, gold_ids, k):
-    """Calculates Precision@K and Recall@K based on Gold Standard IDs."""
+
+def calculate_metrics(retrieved_ids, gold_ids, k=5):
+    """Calculates Precision@K and Recall@K."""
     if not gold_ids or gold_ids == ["N/A"]:
         return None, None
 
-    # Consider only the top K retrieved items
     top_k_ids = retrieved_ids[:k]
-    
-    # Calculate hits
-    hits = sum(1 for x in top_k_ids if x in gold_ids)
-    
-    precision = hits / k if k > 0 else 0
-    recall = hits / len(gold_ids) if len(gold_ids) > 0 else 0
-    
-    return precision, recall
+    hits_k = sum(1 for x in top_k_ids if x in gold_ids)
+    p_k = hits_k / k if k > 0 else 0
+    r_k = hits_k / len(gold_ids) if len(gold_ids) > 0 else 0
+    return p_k, r_k
 
-# --- 5. UI LAYOUT & SIDEBAR ---
+# --- MAIN APP LOGIC ---
 
-st.title("CS 5542 Lab 4 — Project RAG Client")
-st.markdown("Streamlit Frontend → FastAPI Backend → Retrieval Logic")
 
-# Sidebar Configuration
-st.sidebar.header("⚙️ Retrieval Settings")
+if run_btn and question.strip():
+    # =========================================================
+    # THE KEY CHANGE: CALLING THE API INSTEAD OF LOCAL FUNCTIONS
+    # =========================================================
+    with st.spinner("Connecting to RAG API..."):
+        t0 = time.time()
 
-retrieval_mode = st.sidebar.selectbox(
-    "Retrieval Mode",
-    ["Hybrid (Dense+Sparse)", "Dense Only", "Sparse Only"],
-    index=0
-)
-
-top_k = st.sidebar.slider("Top K Retrieved", min_value=1, max_value=30, value=5)
-
-# Dynamic Alpha Slider
-alpha = 0.5
-if retrieval_mode == "Hybrid (Dense+Sparse)":
-    alpha = st.sidebar.slider("Hybrid Alpha (Dense Weight)", 0.0, 1.0, 0.5, 0.1, help="0.0 = Sparse | 1.0 = Dense")
-elif retrieval_mode == "Dense Only":
-    alpha = 1.0
-elif retrieval_mode == "Sparse Only":
-    alpha = 0.0
-
-st.sidebar.divider()
-st.sidebar.header("📂 Logging")
-log_path_input = st.sidebar.text_input("Log File Path", value=LOG_FILE_PATH)
-
-# Mini Gold Set (Test Data)
-MINI_GOLD_SET = {
-    "Q1": {"question": "What is the primary topic of the first document?", "gold_ids": ["doc_1"]},
-    "Q2": {"question": "How does the system handle missing data?", "gold_ids": ["doc_2"]},
-    "Q3": {"question": "What represents the dense vector space?", "gold_ids": ["doc_3"]},
-    "Q4": {"question": "Explain the figure on page 2.", "gold_ids": ["doc_4_img"]},
-    "Q5": {"question": "What is the airspeed velocity of an unladen swallow?", "gold_ids": ["N/A"]},
-}
-
-st.sidebar.divider()
-st.sidebar.header("🧪 Evaluation Context")
-query_id = st.sidebar.selectbox("Select Query ID", list(MINI_GOLD_SET.keys()))
-use_gold_q = st.sidebar.checkbox("Auto-fill Question Text", value=True)
-
-# Main Input Area
-default_text = MINI_GOLD_SET[query_id]["question"] if use_gold_q else ""
-user_question = st.text_area("Enter your question:", value=default_text, height=100)
-run_button = st.button("Run Query", type="primary", use_container_width=True)
-
-# --- 6. MAIN EXECUTION LOGIC ---
-
-if run_button and user_question.strip():
-    col_result, col_metrics = st.columns([2, 1])
-
-    with st.spinner("Waiting for API response..."):
-        start_time = time.time()
-        
-        # Prepare Payload
+        # 1. Prepare Payload
         payload = {
-            "question": user_question,
+            "question": question,
             "top_k": top_k,
             "retrieval_mode": retrieval_mode,
-            "alpha": alpha,
+            "alpha": alpha,  # Sending the hybrid weight
             "use_multimodal": False
         }
 
         try:
-            # API Call
-            response = requests.post(API_URL_QUERY, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            
-            answer_text = data.get("answer", "No answer provided.")
-            evidence_list = data.get("evidence", [])
+            # 2. Send Request
+            response = requests.post(API_URL, json=payload)
+            response.raise_for_status()  # Check for HTTP errors (404, 500)
+
+            # 3. Parse Response
+            api_data = response.json()
+            answer = api_data["answer"]
+            evidence = api_data["evidence"]
 
         except requests.exceptions.ConnectionError:
-            st.error("❌ Connection Error: Is 'api/server.py' running?")
+            st.error("❌ Could not connect to the API. Is 'api/server.py' running?")
             st.stop()
         except Exception as e:
-            st.error(f"❌ API Error: {e}")
+            st.error(f"❌ An error occurred: {e}")
             st.stop()
 
-        latency = round((time.time() - start_time) * 1000, 2)
+        t1 = time.time()
+        latency_ms = round((t1 - t0) * 1000, 2)
+    # =========================================================
 
-    # --- Processing Results ---
-    retrieved_doc_ids = [doc.get("chunk_id") for doc in evidence_list]
-    gold_doc_ids = MINI_GOLD_SET[query_id].get("gold_ids", [])
+    # 4. Metrics & Logging (Client Side)
+    retrieved_ids = [e["chunk_id"] for e in evidence]
+    gold_ids = MINI_GOLD[query_id].get("gold_evidence_ids", [])
 
-    # Calculate Metrics
-    prec_at_k, rec_at_k = calculate_metrics(retrieved_doc_ids, gold_doc_ids, k=top_k)
+    p5, r10 = calculate_metrics(retrieved_ids, gold_ids, k=top_k)
 
-    # --- Display Results ---
-    with col_result:
-        st.subheader("🤖 Generated Answer")
-        if "Not enough evidence" in answer_text:
-            st.warning(answer_text)
+    # 5. Display UI
+    with colA:
+        st.subheader("🤖 Answer")
+        if "Not enough evidence" in answer:
+            st.warning(answer)
         else:
-            st.success(answer_text)
+            st.success(answer)
 
-        st.subheader(f"📄 Evidence (Top {len(evidence_list)})")
-        if not evidence_list:
-            st.info("No documents retrieved.")
+        st.subheader(f"📄 Retrieved Evidence (Top {len(evidence)})")
+        if not evidence:
+            st.info("No evidence found.")
         else:
-            for idx, doc in enumerate(evidence_list):
-                citation = doc.get('citation_tag', f'[Doc {idx}]')
+            for i, doc in enumerate(evidence):
+                citation = doc.get('citation_tag', f'[Doc {i}]')
                 score = doc.get('score', 0.0)
-                content = doc.get('text', 'No text content')
-                source = doc.get('source', 'Unknown source')
-                
-                with st.expander(f"#{idx+1} {citation} (Score: {score:.4f})"):
-                    st.markdown(f"**Source:** `{source}`")
-                    st.text(content)
+                with st.expander(f"#{i+1} {citation} (Score: {score:.4f})"):
+                    st.markdown(f"**Source:** {doc.get('source', 'Unknown')}")
+                    st.text(doc.get('text', ''))
 
-    with col_metrics:
-        st.subheader("📊 Performance Metrics")
-        st.metric("Latency", f"{latency} ms")
-        
-        if prec_at_k is not None:
-            st.metric(f"Precision@{top_k}", f"{prec_at_k:.2f}")
-            st.metric(f"Recall@{top_k}", f"{rec_at_k:.2f}")
+    with colB:
+        st.subheader("📊 Metrics")
+        st.metric("Latency (Client)", f"{latency_ms} ms")
+
+        if p5 is not None:
+            st.metric(f"Precision@{top_k}", f"{p5:.2f}")
+            st.metric(f"Recall@{top_k}", f"{r10:.2f}")
         else:
-            st.info("Metrics unavailable (Gold IDs are N/A)")
+            st.info("Metrics N/A (Gold IDs missing or N/A)")
 
-        st.markdown("#### Debug Data")
+        st.markdown("### Debug Info")
         st.json({
-            "API URL": API_URL_QUERY,
+            "API URL": API_URL,
+            "Mode": retrieval_mode,
             "Alpha": alpha,
-            "Retrieved IDs": retrieved_doc_ids,
-            "Gold IDs": gold_doc_ids
+            "Retrieved IDs": retrieved_ids,
         })
 
-    # --- Logging ---
-    # Determine Pass/Fail logic for "Missing Evidence"
-    missing_behavior_status = "N/A"
-    if gold_doc_ids == ["N/A"]:
-        missing_behavior_status = "Pass" if "Not enough evidence" in answer_text else "Fail"
-    elif gold_doc_ids:
-        missing_behavior_status = "Pass" # Assuming retrieval worked if we have gold IDs
+    # 6. Logging
+    faithfulness_pass = "Yes"  # Placeholder
+
+    missing_behavior_pass = "N/A"
+    if gold_ids == ["N/A"]:
+        missing_behavior_pass = "Pass" if "Not enough evidence" in answer else "Fail"
+    elif gold_ids:
+        missing_behavior_pass = "Pass"
 
     log_entry = {
         "timestamp": pd.Timestamp.utcnow().isoformat(),
         "query_id": query_id,
         "retrieval_mode": retrieval_mode,
         "top_k": top_k,
-        "latency_ms": latency,
-        "Precision@5": prec_at_k if prec_at_k is not None else "NaN",
-        "Recall@10": rec_at_k if rec_at_k is not None else "NaN",
-        "evidence_ids_returned": json.dumps(retrieved_doc_ids),
-        "gold_evidence_ids": json.dumps(gold_doc_ids),
-        "faithfulness_pass": "Yes", # Placeholder
-        "missing_evidence_behavior": missing_behavior_status
+        "latency_ms": latency_ms,
+        "Precision@5": p5 if p5 is not None else "NaN",
+        "Recall@10": r10 if r10 is not None else "NaN",
+        "evidence_ids_returned": json.dumps(retrieved_ids),
+        "gold_evidence_ids": json.dumps(gold_ids),
+        "faithfulness_pass": faithfulness_pass,
+        "missing_evidence_behavior": missing_behavior_pass
     }
 
-    if log_transaction(log_path_input, log_entry):
-        st.toast(f"✅ Logged result for Query ID: {query_id}")
+    if log_row(log_path, log_entry):
+        st.toast(f"✅ Logged query {query_id}")
