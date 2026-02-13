@@ -144,13 +144,28 @@ st.sidebar.divider()
 st.sidebar.header("📂 Logging")
 log_path_input = st.sidebar.text_input("Log File Path", value=LOG_FILE_PATH)
 
-# Mini Gold Set (Test Data)
+
 MINI_GOLD_SET = {
-    "Q1": {"question": "What is the primary topic of the first document?", "gold_ids": ["doc_1"]},
-    "Q2": {"question": "How does the system handle missing data?", "gold_ids": ["doc_2"]},
-    "Q3": {"question": "What represents the dense vector space?", "gold_ids": ["doc_3"]},
-    "Q4": {"question": "Explain the figure on page 2.", "gold_ids": ["doc_4_img"]},
-    "Q5": {"question": "What is the airspeed velocity of an unladen swallow?", "gold_ids": ["N/A"]},
+    "Q1": {
+        "question": "What is the primary limitation of existing graph-based RAG methods that HyperGraphRAG aims to solve?",
+        "gold_ids": ["HyperGraphRAG- Retrieval-Augmented Generation via Hypergraph-Structured Knowledge Representation.pdf::p1"]
+    },
+    "Q2": {
+        "question": "How does the Smart-Summarizer module process raw data in the enterprise framework?",
+        "gold_ids": ["LLM-Powered Knowledge Graphs for Enterprise Intelligence and Analytics.pdf::p3"]
+    },
+    "Q3": {
+        "question": "What specific graph structure does HyperGraphRAG use to store the knowledge hypergraph?",
+        "gold_ids": ["HyperGraphRAG- Retrieval-Augmented Generation via Hypergraph-Structured Knowledge Representation.pdf::p4"]
+    },
+    "Q4": {
+        "question": "Based on Figure 2, how does HyperGraphRAG's knowledge representation differ from Standard RAG and GraphRAG?",
+        "gold_ids": ["HyperGraphRAG- Retrieval-Augmented Generation via Hypergraph-Structured Knowledge Representation.pdf::p2"]
+    },
+    "Q5": {
+        "question": "What are the chemical properties of Hydrogen fuel cells?",
+        "gold_ids": ["N/A"]
+    },
 }
 
 st.sidebar.divider()
