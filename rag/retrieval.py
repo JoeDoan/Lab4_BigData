@@ -6,7 +6,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
+import google.generativeai as genai
 
+GEMINI_API_KEY = "AIzaSyDLsqbLpPRAmzZML99WKBFsiSsopNJfaIU"
+genai.configure(api_key=GEMINI_API_KEY)
+llm_model = genai.GenerativeModel('gemini-3-flash-preview')
 # --- 1. SETUP & DATA LOADING ---
 print("🚀 Initializing RAG Retrieval System...")
 
@@ -176,23 +180,39 @@ def retrieve(question: str, top_k: int = 5, alpha: float = 0.5):
     return hybrid_retrieve(question, top_k=top_k, alpha=alpha)
 
 def generate_answer(question: str, evidence: list):
-    """
-    Generates an answer based on the retrieved evidence.
-    Currently a placeholder. You can connect this to OpenAI/LLM later.
-    """
-    if not evidence:
-        return "Not enough evidence in the retrieved context to answer this question."
 
-    # --- SIMULATED ANSWER GENERATION ---
-    # In a real app, you would send `context_text` to OpenAI/Gemini here.
-    top_doc = evidence[0]
-    
-    # Construct a simple answer using the top document
-    answer = (
-        f"**Answer based on retrieved context:**\n\n"
-        f"According to {top_doc['citation_tag']}, the document mentions that:\n"
-        f"'{top_doc['text'][:200]}...'\n\n"
-        f"*(Note: This is a generated placeholder. Connect an LLM to generate a full answer.)*"
-    )
-    
-    return answer
+    if not evidence:
+        return "I'm sorry, I couldn't find enough evidence in the provided documents to answer your question."
+
+
+    context_text = ""
+    for i, doc in enumerate(evidence):
+        context_text += f"--- Document {i+1} (Source: {doc['citation_tag']}) ---\n"
+        context_text += f"{doc['text']}\n\n"
+
+
+    prompt = f"""
+    You are an intelligent assistant for a Big Data Analytics project. 
+    Use the following retrieved documents to answer the user's question.
+
+    RULES:
+    1. Answer ONLY based on the context provided below. Do not use outside knowledge.
+    2. If the answer is not in the context, state "Not enough evidence in the retrieved context."
+    3. Cite your sources using the format [Source: Document Name] when you use specific information.
+    4. Keep the answer concise and professional.
+
+    CONTEXT:
+    {context_text}
+
+    USER QUESTION: 
+    {question}
+
+    YOUR ANSWER:
+    """
+
+
+    try:
+        response = llm_model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"⚠️ Error generating answer with Gemini: {str(e)}"
