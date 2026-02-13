@@ -9,3 +9,4 @@ pydantic
 sentence-transformers
 pymupdf
 rank_bm25
+google-generativeai
